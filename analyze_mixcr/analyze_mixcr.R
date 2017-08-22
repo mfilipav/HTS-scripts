@@ -1,4 +1,4 @@
-# Last update: 2017-08-11
+# Last update: 2017-08-12
 # 2nd BCR sequencing analysis pipeline using MiXCR stand alone alignment
 # for file in *.fasta; do mixcr align -OallowPartialAlignments=true 
 # --chains IGH --species hsa --report alignment_"${file}".log --save-description 
@@ -22,25 +22,24 @@ library(data.table)
 
 
 ###### Import data #####
-setwd("~/seqdata/2017-08-05/mixcr_alignment/")
+setwd("~/seqdata/2017-08-21/mixcr/clones/")
 
-file_list = list.files(pattern = "*.txt")
+file_list = list.files(pattern = "*txt")
 #file_list <- file_list[1] # subset desired files
 file_list
 
 count.fields("data.txt", sep = "\t")
 
-colclasses <- rep("NULL", 2)  # 31 cols in IMGT's 1_Summary file
-colclasses[c(1, 2)] <- 
-    rep("character", length(c(1, 2)), colclasses) # 5 and 31 too
-
-
+colclasses <- rep("NULL", 35)  # 31 cols in IMGT's 1_Summary file
+colclasses[c(2, 3, 6, 33)] <- 
+    rep("character", length(c(2, 3, 6, 33)), colclasses) # 5 and 31 too
 
 # Pull data into a single list of DFs
 data_list_dirty = lapply(file_list, read.table, fill = TRUE, header = TRUE,
                          sep = "\t", na.strings = " ",
                          colClasses = colclasses)
 View(data_list_dirty[[1]])
+#write.csv(data_list_df, "./clonotpyes_12pcr_products.csv", sep="\t")
 
 
 # Rename samples
@@ -61,113 +60,91 @@ names(data_list_dirty) <- sample_names
 
 
 ########### DATA CLEAN-UP ########
-# Collect stats about raw dataset
-rm(data_stats)
-data_stats <- list()
 
-for (i in length(data_list_dirty)) {
-    data_stats[[1]] <- names(data_list_dirty[1]) # names
-    data_stats[[2]] <- length(data_list_dirty[[1]]$Functionality)    
-    data_stats[[3]] <- length(which(data_list_dirty[[1]]$Functionality == "no result"))    # not aligned
-    # data_stats[i][3] <- length(which(data_list_dirty[[i]]$Functionality == "unproductive")) # aligned
-}
+######## Filter for unproductive V-genes ##########
+# remove stop codons
+parasites <- c("\\*", "\\_")
+data_list <- lapply(data_list_dirty, function(df)
+    df[!grepl(paste(parasites, collapse = "|"), df$aaSeqCDR3), ]
+)
 
-View(data_list_dirty[[1]])
-
-
-# ######## Filter for unproductive V-genes ##########
-# # Here we have only "unproductive" and "no result" labels
-# # None of the V-genes are productive, because of CDR3 missing
-# data_list <- lapply(data_list_dirty, function(df) {
-#     subset(df, df$V.DOMAIN.Functionality == "unknown (see comment)")
-# })
-# # Alt solution using which:
-# # data_list[[1]] <- data_list_dirty[[1]][which(data_list_dirty[[1]]$Functionality == "productive"), ]
-# rm(data_list_dirty)
-# 
-# 
-# ####### Fix V-gene names ########
-# # Check all possible factor levels in categorical variable vector
-# V_gene_factors <- factor(data_list[[1]]$bestVGene)
-# V_gene_factors[[1]]
-# 
-# # cleanup V-D-J gene names
-# 
-# data_list <- lapply(data_list, function(df) {
-#     df$bestVGene <- gsub("Homsap ", "", df$bestVGene);
-#     # matches "homosap" and removes it
-#     return(df)
-# })
-# 
-# data_list <- lapply(data_list, function(df) {
-#     df$bestVGene <- gsub("S", "-", df$bestVGene);
-#     return(df)
-# })
-# 
-# data_list <- lapply(data_list, function(df) {
-#     df$bestVGene <- gsub("\\*.*", "", df$V.GENE.and.allele);
-#     return(df)
-# })
-# 
-# data_list <- lapply(data_list, function(df) {
-#     df$V.GENE.and.allele.short <- gsub("\\-.*", "", df$V.GENE.and.allele);
-#     # matches everything after "-" and removes it
-#     return(df)
-# })
-# 
-# 
-# data_list[[1]]$V.GENE.and.allele
-
-#data_list_dirty <- data_list
-
-######## Filter out empty rows ##########
-data_list <- lapply(data_list_dirty, function(df) {
-    subset(df, df$bestVGene != "")
+# cleanup V-D-J gene names
+data_list <- lapply(data_list, function(df) {
+    df$allVHitsWithScore <- gsub("\\*.*", "", df$allVHitsWithScore);
+    #df$allDHitsWithScore <- gsub("\\*.*", "", df$allDHitsWithScore);
+    #df$allJHitsWithScore <- gsub("\\*.*", "", df$allJHitsWithScore);
+    return(df)
 })
 
-# Check for empty rows in selected dataframes
-#length(which(data_list[[1]]$bestVGene == ""))
+# add CDR3 nt and aa lengths as new df columns
+data_list <- lapply(data_list, function(df) {
+    #df$nSeqCDR3Length <- nchar(df$nSeqCDR3); 
+    df$aaSeqCDR3Length <- nchar(df$aaSeqCDR3);
+    return(df)
+})
+
+
+######## Filter out empty rows ##########
+data_list <- lapply(data_list, function(df) {
+    subset(df, df$allVHitsWithScore != "")
+})
+
+########### Adding ID after cleanup #############
+data_list_with_singletons <- lapply(data_list, function(df) {
+    df$id <- seq.int(nrow(df));
+    return(df)
+})
+
+########### Singleton Removal #############
+data_list <- lapply(data_list_with_singletons, function(df) {
+    subset(df, df$cloneCount > 1)
+})
+
+
+########### Update/Normalize cloneFractions to % value#######
+data_list <- lapply(data_list, function(df) {
+    df$cloneFraction <- as.numeric(df$cloneFraction) / sum(as.numeric(df$cloneFraction)) * 100;
+    return(df)
+    # sum(as.numeric(test_data$cloneFractionNorm))  ## test sum for 100%
+})
 
 
 
-
-
-
-
-
-
-# Subset all data_list_dirty into data_list, since we need no clean-up
-data_list <- data_list_dirty
-rm(data_list_dirty)
 
 ##### Stats about sequence quality #######
 # print df lengths BEFORE singleton removal
-lapply(data_list_dirty, function(df) {
-    cat(paste(length(df$Functionality)), "\n")
+lapply(data_list, function(df) {
+    cat(paste(length(df$cloneCount)), "\n")
 })
 
 # print df lengths after singleton removal
-lapply(data_list, function(df) {
-    cat(paste(length(df$bestVGene)), "\n")
+lapply(data_list_wout_singletons, function(df) {
+    cat(paste(length(df$cloneCount)), "\n")
 })
-
 
 
 
 
 ########## PLOTS ##########
+data_list_wsingletons <- data_list
+data_list <- data_list_wout_singletons
 
 ########## VDJ gene count and allele frequency plots ##########
 
 ##### Allele frequency plot #####
 # Frequency rank V-gene occurence, and store in list of DFs
 vgene_prop_table_sorted <- lapply(data_list, function(df) {
-    data.frame(sort(prop.table(table(df$bestVGene))*100, decreasing = TRUE))
+    data.frame(sort(prop.table(table(df$allVHitsWithScore))*100, decreasing = TRUE))
 })
+
+
+vgene_freq_df <- bind_rows(vgene_prop_table_sorted, .id = "df" )
+write.table(vgene_freq_df, "./vgene_frequencies_no_singletons_20170821_mf.txt", sep="\t")
+
 
 # Filter out sequences with Freq > 1%
 vgene_prop_table_sorted_1 <- lapply(vgene_prop_table_sorted, function(df) {
-    df[which(df$Freq > 0.01),]
+    df[which(df$Freq > 1),]
 })
 
 
@@ -190,14 +167,80 @@ for (i in 1:length(vgene_prop_table_sorted_1)) {
 
     # vgene_plot_freq
 
-    ggsave(filename = paste("0", i, "_", df, "_vgene.pdf", sep = ""), 
-           plot = vgene_plot_freq, device = "pdf")
+    ggsave(filename = paste("0", i, "_", df, "_nosingletons_vgene_1percent.pdf", sep = ""), 
+           plot = vgene_plot_freq, width = 8.97, height = 8.97, device = "pdf")
 
 }
 
-vgene_freq_df <- bind_rows(vgene_prop_table_sorted, .id=df)
 
-write.table(vgene_freq_df, "./vgene_frequencies_20170811_mf.txt", sep="\t")
+################### 1 2 3  plot ####################
+data_list_1 <- data_list[5:6]
+data_list_2 <- data_list[c(1, 4, 8)]
+data_list_3 <- data_list[c(2, 3, 7)]
+
+for (i in 1:length(vgene_prop_table_sorted_1)) {
+    
+    #bla <- nrow(vgene_prop_table_sorted[[i]])
+    #i = 3
+    df = names(vgene_prop_table_sorted_1[i])
+    vgene_plot_freq <- ggplot(bind_rows(vgene_prop_table_sorted_1[[i]], 
+                                        .id=df),
+                              aes(x = Var1, y = Freq, fill = df)) +
+        
+        geom_bar(stat="identity", position='dodge') +
+        theme(axis.text.x=element_text(angle = +45, hjust = 1)) +
+        labs(x="V-gene", y="Frequency (%)")
+    
+    # vgene_plot_freq
+    
+    ggsave(filename = paste("0", i, "_", df, "sample_1_vgene_1percent.pdf", sep = ""), 
+           plot = vgene_plot_freq, device = "pdf")
+}
+
+
+## 2017-08-22
+########## Species Accumulation Plots #######
+
+test_data <- data_list[[1]]
+
+
+# Add id indeces {1, 2, 3, ... , nrow(df)}
+test_data$id <- seq.int(nrow(test_data))
+cdr3_all <- test_data$aaSeqCDR3
+cdr3_unique <- length(unique(cdr3_all))
+
+## print unique clones for each data set:
+
+lapply(data_list, function(df) {
+    cat(paste(length(unique(df$aaSeqCDR3))), "\n")
+})
+
+sum(as.numeric(test_data$cloneFraction)) 
+
+# normalize cloneFractions to account for cleanup
+test_data$cloneFractionNorm <- as.numeric(test_data$cloneFraction) / sum(as.numeric(test_data$cloneFraction)) * 100
+# sum(as.numeric(test_data$cloneFractionNorm))  ## test sum for 100%
+
+for (i in 1:length(vgene_prop_table_sorted_1)) {
+    
+    #bla <- nrow(vgene_prop_table_sorted[[i]])
+    #i = 3
+    #df = names(vgene_prop_table_sorted_1[i])
+    
+    cdr3_frequency_plot <- ggplot(test_data, aes(x = id, y = cloneFractionNorm)) + 
+                            geom_point(colour = "black") +
+                            labs(x="Clone count", y="CDR3 Clone Frequency (%)")
+    
+    ggsave(filename = paste("0", i, "_", df, "cdr3_freq.pdf", sep = ""), 
+           plot = cdr3_frequency_plot, device = "pdf")
+}
+
+rm(cdr3_frequency_plot)
+
+
+
+
+
 
 
 
@@ -232,7 +275,7 @@ barplot(1:12, xlab = "bla")
 # 
 
 # # percentage plots 
-# data_list23 <- data_list[1]
+# data_list <- data_list[1]
 # ggplot(bind_rows(data_list23, .id="df"), aes(x = factor(V.GENE.and.allele), fill = df)) +  
 #     geom_bar(aes(y = (..count..)/sum(..count..)), position = "dodge") + 
 #     scale_y_continuous(labels = scales::percent) +
@@ -301,16 +344,16 @@ rank_plots
 # then I won't have 100% identity across the columns!!!
 data_list23 <- data_list[1:8]
 
-intersection_matrix <- matrix(, length(data_list23), length(data_list23))
-for (i in 1:length(data_list23)) {
+intersection_matrix <- matrix(, length(data_list), length(data_list))
+for (i in 1:length(data_list)) {
     
-    for (j in 1:length(data_list23)) {
+    for (j in 1:length(data_list)) {
         
-        len_intersect <- length(intersect(unique(data_list23[[i]]$aaSeqCDR3), 
-                                          unique(data_list23[[j]]$aaSeqCDR3)))
+        len_intersect <- length(intersect(unique(data_list[[i]]$aaSeqCDR3), 
+                                          unique(data_list[[j]]$aaSeqCDR3)))
         
-        len_min <- min(length(unique(data_list23[[i]]$aaSeqCDR3)), 
-                       length(unique(data_list23[[j]]$aaSeqCDR3)))
+        len_min <- min(length(unique(data_list[[i]]$aaSeqCDR3)), 
+                       length(unique(data_list[[j]]$aaSeqCDR3)))
         
         intersection_matrix[i, j] <- len_intersect / len_min * 100
         
@@ -318,11 +361,9 @@ for (i in 1:length(data_list23)) {
 }
 
 intersection_matrix_pretty <- round(intersection_matrix, 1)
-rownames(intersection_matrix_pretty) <- c("n1a", "n1b", "m2a", "m2b", 
-                                          "n2", "m3a", "m3b", "n3")
+rownames(intersection_matrix_pretty) <- sample_names
 
-colnames(intersection_matrix_pretty) <- c("n1a", "n1b", "m2a", "m2b", 
-                                          "n2", "m3a", "m3b", "n3")
+colnames(intersection_matrix_pretty) <- sample_names
 
 intersection_matrix_pretty
 col_scheme <- colorRampPalette(c("yellow", "red"))(n = 1000)
@@ -366,34 +407,5 @@ barplot(intersection_oneVsAll,
         ylab = "CDR3 aa overlap (%) between individual and all samples",
 )
 
-barplo
-mean(intersection_oneVsAll)
 
-?barplot
-
-View(data_list)
-
-
-
-
-
-
-# create graphics object with 3 libraries
-venn_cdr3_overlap <- venn.diagram(list("1 Library" = A, "2 Library" = B),
-                                  filename = NULL, print.mode = "raw",
-                                  #set print.mode = "perc", for percentage display
-                                  
-                                  cex = 1, fontfamily = "sans",
-                                  cat.cex = 1, cat.dist = c(0.1,0.1),
-                                  cat.fontface = "bold",
-                                  cat.fontfamily = "sans")
-grid.draw(venn_cdr3_overlap)
-
-
-
-
-
-
-
-View(data_list23[1])
 
