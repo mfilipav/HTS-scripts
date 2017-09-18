@@ -22,7 +22,7 @@ library(data.table)
 
 
 ###### Import data #####
-setwd("~/seqdata/2017-08-21/mixcr/clones/")
+setwd("~/seqdata/2017-08-21/mixcr/clones/deliverables/")
 
 file_list = list.files(pattern = "*txt")
 #file_list <- file_list[1] # subset desired files
@@ -38,7 +38,7 @@ colclasses[c(2, 3, 6, 33)] <-
 data_list_dirty = lapply(file_list, read.table, fill = TRUE, header = TRUE,
                          sep = "\t", na.strings = " ",
                          colClasses = colclasses)
-View(data_list_dirty[[1]])
+#View(data_list_dirty[[1]])
 #write.csv(data_list_df, "./clonotpyes_12pcr_products.csv", sep="\t")
 
 
@@ -62,13 +62,13 @@ names(data_list_dirty) <- sample_names
 ########### DATA CLEAN-UP ########
 
 ######## Filter for unproductive V-genes ##########
-# remove stop codons
+#### Remove stop codons ####
 parasites <- c("\\*", "\\_")
 data_list <- lapply(data_list_dirty, function(df)
     df[!grepl(paste(parasites, collapse = "|"), df$aaSeqCDR3), ]
 )
 
-# cleanup V-D-J gene names
+##### Cleanup V-D-J gene names ####
 data_list <- lapply(data_list, function(df) {
     df$allVHitsWithScore <- gsub("\\*.*", "", df$allVHitsWithScore);
     #df$allDHitsWithScore <- gsub("\\*.*", "", df$allDHitsWithScore);
@@ -76,7 +76,7 @@ data_list <- lapply(data_list, function(df) {
     return(df)
 })
 
-# add CDR3 nt and aa lengths as new df columns
+#### Add CDR3 nt and aa lengths as new df columns ####
 data_list <- lapply(data_list, function(df) {
     #df$nSeqCDR3Length <- nchar(df$nSeqCDR3); 
     df$aaSeqCDR3Length <- nchar(df$aaSeqCDR3);
@@ -84,29 +84,165 @@ data_list <- lapply(data_list, function(df) {
 })
 
 
-######## Filter out empty rows ##########
+#### Filter out empty rows ####
 data_list <- lapply(data_list, function(df) {
     subset(df, df$allVHitsWithScore != "")
 })
 
-########### Adding ID after cleanup #############
+
+#### Adding ID after cleanup ####
 data_list_with_singletons <- lapply(data_list, function(df) {
     df$id <- seq.int(nrow(df));
     return(df)
 })
 
-########### Singleton Removal #############
+
+##### Singleton Removal ####
 data_list <- lapply(data_list_with_singletons, function(df) {
     subset(df, df$cloneCount > 1)
 })
 
 
-########### Update/Normalize cloneFractions to % value#######
+##### Update/Normalize cloneFractions to % value ####
 data_list <- lapply(data_list, function(df) {
-    df$cloneFraction <- as.numeric(df$cloneFraction) / sum(as.numeric(df$cloneFraction)) * 100;
+    df$cloneFraction <- 
+        as.numeric(df$cloneFraction) / sum(as.numeric(df$cloneFraction)) * 100;
     return(df)
     # sum(as.numeric(test_data$cloneFractionNorm))  ## test sum for 100%
 })
+
+
+#### Add Cumulative Sum of Normalized V-gene Frequencies ####
+data_list <- lapply(data_list, function(df) {
+    df$cloneFractionCumSum <- cumsum(as.numeric(df$cloneFraction));
+    return(df)
+    # sum(as.numeric(test_data$cloneFractionNorm))  ## test sum for 100%
+})
+
+
+
+
+
+
+#### RECON DIVERSITY ESTIMATE PREP #### 
+library(dplyr)
+
+count_cdr3_df <- bind_rows(data_list_with_singletons[c(1:4, 7:9, 11, 12)])
+
+count_cdr3_df <- count_cdr3_df[, c(1,4)]
+count_cdr3_df$cloneCount <- as.numeric(count_cdr3_df$cloneCount)
+
+count_cdr3_df_grouped <- 
+    count_cdr3_df %>%
+    group_by(aaSeqCDR3) %>%
+    summarise(count_sum = sum(cloneCount))
+    
+# Check for consistency after count collapse
+sum(count_cdr3_df_grouped$count_sum)
+sum(count_cdr3_df$cloneCount)
+
+count_cdr3_df_grouped_final <- 
+    count_cdr3_df_grouped[with(count_cdr3_df_grouped, order(-count_sum)), ]
+
+count_cdr3_df_grouped_final <- count_cdr3_df_grouped_final[ , 2]
+
+count_cdr3_df_grouped_final_100out <- 
+cdr3_freq$index <- 1:nrow(cdr3_freq)
+
+
+write.table(count_cdr3_df_grouped_final, "./cdr3s_only_counts_with_singletons_no_vh2a_2b_vh4_2017-08-24.txt", 
+            sep="\t", quote = F, row.names = T)
+
+count_cdr3_df_grouped_final <- 
+    read.csv("./seqdata/2017-08-21/mixcr/clones/cdr3s_counts_with_singletons_no_vh2a_2b_vh4_2017-08-24.txt", 
+             sep = "\t")
+
+# expand the CDR3s by counts
+count_cdr3_df_grouped_final_expanded <- 
+    count_cdr3_df_grouped_final[rep(seq_len(nrow(count_cdr3_df_grouped_final)), 
+                                    count_cdr3_df_grouped_final$count_sum), 1:2]
+
+set.seed(35) # previous 2
+count_cdr3_unique_vector <- sample(as.character(count_cdr3_df_grouped_final$aaSeqCDR3))
+set.seed(35)
+count_cdr3_exp_vector <- sample(as.character(count_cdr3_df_grouped_final_expanded$aaSeqCDR3))
+expanded_cdr3_vector <- count_cdr3_exp_vector
+
+# # mathch() returns the first instance index
+# match("CARCSGGSCYYGMDVW", count_cdr3_exp_vector) # 541, out of 100
+# grep("CARCSGGSCYYGMDVW", count_cdr3_exp_vector)
+# 
+# # dummy vectior
+# expanded_cdr3_vector <- rep(c("a","b","c"), times = c(2,3,4))
+
+index_vector <- sample(1:length(expanded_cdr3_vector))
+
+# split into chunks of size 1000
+split_index <- split(index_vector, ceiling(seq_along(index_vector)/10000))
+
+sr_sampled <- vector()
+
+for(i in 1:length(split_index)){ # for each 1000-clone sized chunk
+    # bla<-unlist(split_index[1:10])
+    # length(unique(expanded_cdr3_vector[bla]))
+    sr_sampled[i] <-
+        length(unique(expanded_cdr3_vector[unlist(split_index[1:i])]))
+    print(i)
+    
+}
+
+
+sr_sampled_norm <- sr_sampled/length(unique(expanded_cdr3_vector))*100
+
+plot(sr_sampled_norm, x, xlab = "Bins sampled", ylab = "Fraction unique CDR3 sequences discovered (%)")
+axis(side=1, at=c(0:100))
+
+x <- seq(from=0, to =100, by=1)
+
+library(ggplot2)
+ggplot(sr_sampled_norm,)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# #totally didn't work
+# clean_list <- list()
+# for (i in 1:length(unique_mask)) {
+#     temp_sum <- sum(df_test[which(df_test$cdr3 %in% unique_mask[i]), ]$count)
+#     clean_list[[i]] <- c(temp_sum, unique_mask[i])
+# }
+#id <- c("vh1", "vh1", "vh1", "vh2", "vh2", "vh3", "vh3")
+# count <- c(30, 20, 10, 25, 15, 50, 40)
+# cdr3 <- c("aaa", "aab", "aac", "bbb", "aab", "aac", "ccc")
+# test_df <- data.frame(count, cdr3)
+# unique_mask <- as.character(unique(test_df$cdr3))
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -125,9 +261,9 @@ lapply(data_list_wout_singletons, function(df) {
 
 
 
+
+
 ########## PLOTS ##########
-data_list_wsingletons <- data_list
-data_list <- data_list_wout_singletons
 
 ########## VDJ gene count and allele frequency plots ##########
 
@@ -153,9 +289,7 @@ vgene_prop_table_sorted_1 <- lapply(vgene_prop_table_sorted, function(df) {
 # freqencies for each df add up to 1
 # https://stackoverflow.com/questions/17368223/ggplot2-multi-group-histogram-with-in-group-proportions-rather-than-frequency
 for (i in 1:length(vgene_prop_table_sorted_1)) {
-    
-    #bla <- nrow(vgene_prop_table_sorted[[i]])
-    #i = 3
+ 
     df = names(vgene_prop_table_sorted_1[i])
     vgene_plot_freq <- ggplot(bind_rows(vgene_prop_table_sorted_1[[i]], 
                                         .id=df),
@@ -165,13 +299,10 @@ for (i in 1:length(vgene_prop_table_sorted_1)) {
         theme(axis.text.x=element_text(angle = +45, hjust = 1)) +
         labs(x="V-gene", y="Frequency (%)")
 
-    # vgene_plot_freq
-
     ggsave(filename = paste("0", i, "_", df, "_nosingletons_vgene_1percent.pdf", sep = ""), 
            plot = vgene_plot_freq, width = 8.97, height = 8.97, device = "pdf")
 
 }
-
 
 ################### 1 2 3  plot ####################
 data_list_1 <- data_list[5:6]
@@ -180,8 +311,6 @@ data_list_3 <- data_list[c(2, 3, 7)]
 
 for (i in 1:length(vgene_prop_table_sorted_1)) {
     
-    #bla <- nrow(vgene_prop_table_sorted[[i]])
-    #i = 3
     df = names(vgene_prop_table_sorted_1[i])
     vgene_plot_freq <- ggplot(bind_rows(vgene_prop_table_sorted_1[[i]], 
                                         .id=df),
@@ -199,43 +328,55 @@ for (i in 1:length(vgene_prop_table_sorted_1)) {
 
 
 ## 2017-08-22
-########## Species Accumulation Plots #######
-
-test_data <- data_list[[1]]
-
-
-# Add id indeces {1, 2, 3, ... , nrow(df)}
-test_data$id <- seq.int(nrow(test_data))
-cdr3_all <- test_data$aaSeqCDR3
-cdr3_unique <- length(unique(cdr3_all))
-
-## print unique clones for each data set:
-
-lapply(data_list, function(df) {
-    cat(paste(length(unique(df$aaSeqCDR3))), "\n")
-})
-
-sum(as.numeric(test_data$cloneFraction)) 
-
-# normalize cloneFractions to account for cleanup
-test_data$cloneFractionNorm <- as.numeric(test_data$cloneFraction) / sum(as.numeric(test_data$cloneFraction)) * 100
-# sum(as.numeric(test_data$cloneFractionNorm))  ## test sum for 100%
-
-for (i in 1:length(vgene_prop_table_sorted_1)) {
+######## Species Accumulation Plot ########
+#### CDR3 frequency plot ####
+cdr3_frequency_plot_list <- list()
+for (i in 1:length(data_list)) {
     
-    #bla <- nrow(vgene_prop_table_sorted[[i]])
-    #i = 3
-    #df = names(vgene_prop_table_sorted_1[i])
+    df = names(data_list[i])
+    cdr3_frequency_plot <- 
+        ggplot(data_list[[i]], aes(x = id, y = cloneFraction)) + # fill = df))
+        
+        geom_point(colour = "black") +
+        labs(x=paste(df, " Clone count"), y=paste(df, " CDR3 Clone Frequency (%)"))
     
-    cdr3_frequency_plot <- ggplot(test_data, aes(x = id, y = cloneFractionNorm)) + 
-                            geom_point(colour = "black") +
-                            labs(x="Clone count", y="CDR3 Clone Frequency (%)")
+    cdr3_frequency_plot_list[[i]] <- cdr3_frequency_plot
     
-    ggsave(filename = paste("0", i, "_", df, "cdr3_freq.pdf", sep = ""), 
-           plot = cdr3_frequency_plot, device = "pdf")
+    
+    # ggsave(filename = paste("0", i, "_", df, "cdr3_freq.pdf", sep = ""), 
+    #        plot = cdr3_frequency_plot, device = "pdf")
+
+}
+pdf("cdr3_freq.pdf")
+invisible(lapply(cdr3_frequency_plot_list, print))
+dev.off()
+cdr3_frequency_plot_list[[1]]
+
+
+
+
+#### Cumulative CDR3 frequency plot ####
+cdr3_cum_frequency_plot_list <- list()
+for (i in 1:length(data_list)) {
+
+    df = names(data_list[i])
+    cdr3_cum_frequency_plot <- 
+        ggplot(data_list[[i]], aes(x = id, y = cloneFractionCumSum)) + 
+        
+        geom_point(colour = "black") +
+        labs(x=paste(df, " Clone count"), 
+             y=paste(df, " Cumulative CDR3 Clone Frequency (%)"))
+        
+    cdr3_cum_frequency_plot_list[[i]] <- cdr3_cum_frequency_plot
+    # # print individual plots
+    # ggsave(filename = paste("0", i, "_", df, "cum_cdr3_freq.pdf", sep = ""),
+    #        plot = cdr3_cum_frequency_plot, device = "pdf")
 }
 
-rm(cdr3_frequency_plot)
+pdf("cum_cdr3_freq.pdf")
+invisible(lapply(cdr3_cum_frequency_plot_list, print))
+dev.off()
+cdr3_cum_frequency_plot_list[[1]]
 
 
 
@@ -372,9 +513,10 @@ heatmap.2(intersection_matrix_pretty, Colv = FALSE, Rowv = FALSE, col = col_sche
 
 
 # Melt list into df, number of unique clones
-melt_data_list <- melt(data_list)
+melt_data_list <- bind_rows(data_list)
 length((melt_data_list$aaSeqCDR3))
 length(unique(melt_data_list$aaSeqCDR3))
+
 
 
 

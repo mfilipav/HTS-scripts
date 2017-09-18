@@ -1,0 +1,10 @@
+Initial reads into analysis: 1000 
+Reads after removing Unproductive sequences: 782 
+Reads for which VDJ aa sequence appears at least twice: 599 
+Unique HCDR3 aa seqs: 5 
+Unique HCRD3 aa seqs that have more than 0 counts: 5 
+[1]  3  4 19 24 41
+cNumber of clonotypes at h = 0.25 aa sequence identity is: 3 
+clones must appear more than 5 times to be considered for clonotyping 
+[1] 597
+[1] 597
